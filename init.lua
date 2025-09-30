@@ -97,7 +97,11 @@ vim.keymap.set('v', 'mm', '<Esc>')
 -- NOTE: This won't work in all terminal emulators/tmux/etc. Try your own mapping
 -- or just use <C-\><C-n> to exit terminal mode
 vim.keymap.set('t', '<Esc><Esc>', '<C-\\><C-n>', { desc = 'Exit terminal mode' })
-
+vim.keymap.set('n', '<Esc>', function()
+  if not require('copilot-lsp.nes').clear() then
+    vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
+  end
+end, { desc = 'Clear Copilot sugg or fallback' })
 -- TIP: Disable arrow keys in normal mode
 vim.keymap.set('n', '<left>', '<cmd>echo "Use h to move!!"<CR>')
 vim.keymap.set('n', '<right>', '<cmd>echo "Use l to move!!"<CR>')
@@ -333,6 +337,10 @@ require('lazy').setup({
           },
         },
       }
+      require('copilot-lsp').setup {
+
+        nes = { move_count_threshold = 3 },
+      }
 
       -- Enable Telescope extensions if they are installed
       pcall(require('telescope').load_extension, 'fzf')
@@ -377,6 +385,46 @@ require('lazy').setup({
   },
 
   -- LSP Plugins
+  -- Copilot Two pluggins
+  {
+    'copilotlsp-nvim/copilot-lsp',
+    init = function()
+      vim.g.copilot_nes_debounce = 500
+      vim.lsp.enable 'copilot_ls'
+      vim.keymap.set('n', '<tab>', function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local state = vim.b[bufnr].nes_state
+        if state then
+          -- Try to jump to the start of the suggestion edit.
+          -- If already at the start, then apply the pending suggestion and jump to the end of the edit.
+          local _ = require('copilot-lsp.nes').walk_cursor_start_edit()
+            or (require('copilot-lsp.nes').apply_pending_nes() and require('copilot-lsp.nes').walk_cursor_end_edit())
+          return nil
+        else
+          -- Resolving the terminal's inability to distinguish between `TAB` and `<C-i>` in normal mode
+          return '<C-i>'
+        end
+      end, { desc = 'Accept Copilot NES suggestion', expr = true })
+    end,
+  },
+  -- copilot second plugin
+  {
+    'zbirenbaum/copilot.lua',
+    dependencies = {
+      'copilotlsp-nvim/copilot-lsp', -- optional NES support
+    },
+    config = function()
+      require('copilot').setup {
+        panel = { enabled = true },
+        suggestion = { enabled = true, auto_trigger = true },
+        filetypes = { ['*'] = true }, -- enable for all filetypes
+      }
+
+      -- Optional: custom keymap to accept Copilot suggestions
+      vim.api.nvim_set_keymap('i', '<C-J>', 'copilot#Accept("<CR>")', { expr = true, silent = true })
+    end,
+  },
+
   {
     -- `lazydev` configures Lua LSP for your Neovim config, runtime and plugins
     -- used for completion, annotations and signatures of Neovim apis
@@ -595,7 +643,7 @@ require('lazy').setup({
         --    https://github.com/pmizio/typescript-tools.nvim
         --
         -- But for many setups, the LSP (`ts_ls`) will work just fine
-        -- ts_ls = {},
+        ts_ls = {},
         --
 
         lua_ls = {
@@ -924,5 +972,80 @@ require('lazy').setup({
   },
 })
 require('lspconfig').clangd.setup {}
+require('copilot').setup {
+  panel = {
+    enabled = true,
+    auto_refresh = false,
+    keymap = {
+      jump_prev = '[[',
+      jump_next = ']]',
+      accept = '<CR>',
+      refresh = 'gr',
+      open = '<M-CR>',
+    },
+    layout = {
+      position = 'bottom', -- | top | left | right | bottom |
+      ratio = 0.4,
+    },
+  },
+  suggestion = {
+    enabled = true,
+    auto_trigger = false,
+    hide_during_completion = true,
+    debounce = 75,
+    trigger_on_accept = true,
+    keymap = {
+      accept = '<M-l>',
+      accept_word = false,
+      accept_line = false,
+      next = '<M-]>',
+      prev = '<M-[>',
+      dismiss = '<C-]>',
+    },
+  },
+  nes = {
+    enabled = true, -- requires copilot-lsp as a dependency
+    auto_trigger = true,
+    keymap = {
+      accept_and_goto = false,
+      accept = true,
+      dismiss = false,
+    },
+  },
+  auth_provider_url = nil, -- URL to authentication provider, if not "https://github.com/"
+  logger = {
+    file = vim.fn.stdpath 'log' .. '/copilot-lua.log',
+    file_log_level = vim.log.levels.OFF,
+    print_log_level = vim.log.levels.WARN,
+    trace_lsp = 'off', -- "off" | "messages" | "verbose"
+    trace_lsp_progress = false,
+    log_lsp_messages = false,
+  },
+  copilot_node_command = 'node', -- Node.js version must be > 20
+  workspace_folders = {},
+  copilot_model = '',
+  disable_limit_reached_message = false, -- Set to `true` to suppress completion limit reached popup
+  root_dir = function()
+    return vim.fs.dirname(vim.fs.find('.git', { upward = true })[1])
+  end,
+  should_attach = function(_, _)
+    if not vim.bo.buflisted then
+      logger.debug "not attaching, buffer is not 'buflisted'"
+      return false
+    end
+
+    if vim.bo.buftype ~= '' then
+      logger.debug("not attaching, buffer 'buftype' is " .. vim.bo.buftype)
+      return false
+    end
+
+    return true
+  end,
+  server = {
+    type = 'nodejs', -- "nodejs" | "binary"
+    custom_server_filepath = nil,
+  },
+  server_opts_overrides = {},
+}
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
